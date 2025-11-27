@@ -1,0 +1,390 @@
+import os
+import pandas as pd
+import numpy as np
+import streamlit as st
+import plotly.express as px
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+from openai import AzureOpenAI
+import json
+
+# ---------- Azure OpenAI Config ----------
+......
+
+# ---------- Initialize Azure OpenAI Client ----------
+@st.cache_resource
+def get_ai_client():
+    return AzureOpenAI(
+        api_version=api_version,
+        azure_endpoint=endpoint,
+        api_key=subscription_key,
+    )
+
+# ---------- Load Data ----------
+@st.cache_data
+def load_data():
+    """Load the CSV data"""
+    try:
+        df = pd.read_csv("data1.csv")
+        return df
+    except Exception as e:
+        st.error(f"Error loading data: {e}")
+        return None
+
+# ---------- AI-Powered Insights ----------
+def get_ai_insights(client, data_summary, question=None):
+    """Get AI-powered insights about the data"""
+    if question:
+        prompt = f"""Based on this dataset summary:
+{data_summary}
+
+Answer this specific question: {question}
+
+Provide a clear, concise answer with specific insights."""
+    else:
+        prompt = f"""Analyze this dataset summary and provide key insights:
+{data_summary}
+
+Provide:
+1. Key patterns or trends observed
+2. Notable statistics
+3. Potential anomalies or interesting findings
+4. Recommendations for further analysis
+
+Keep the response concise and actionable."""
+    
+    try:
+        response = client.chat.completions.create(
+            model=deployment,
+            messages=[
+                {"role": "system", "content": "You are a data analyst expert. Provide clear, actionable insights based on data summaries."},
+                {"role": "user", "content": prompt}
+            ],
+            max_completion_tokens=800,
+            temperature=0.7,
+        )
+        return response.choices[0].message.content
+    except Exception as e:
+        return f"Error getting AI insights: {e}"
+
+# ---------- Statistical Analysis ----------
+def get_statistical_summary(df):
+    """Generate comprehensive statistical summary"""
+    summary = {
+        "Basic Info": {
+            "Total Rows": len(df),
+            "Total Columns": len(df.columns),
+            "Memory Usage": f"{df.memory_usage(deep=True).sum() / 1024**2:.2f} MB"
+        },
+        "Numerical Columns": {},
+        "Categorical Columns": {}
+    }
+    
+    # Analyze numerical columns
+    numeric_cols = df.select_dtypes(include=[np.number]).columns
+    for col in numeric_cols:
+        summary["Numerical Columns"][col] = {
+            "Mean": df[col].mean(),
+            "Median": df[col].median(),
+            "Std Dev": df[col].std(),
+            "Min": df[col].min(),
+            "Max": df[col].max(),
+            "Missing": df[col].isna().sum(),
+            "Unique Values": df[col].nunique()
+        }
+    
+    # Analyze categorical columns
+    cat_cols = df.select_dtypes(include=['object']).columns
+    for col in cat_cols:
+        summary["Categorical Columns"][col] = {
+            "Unique Values": df[col].nunique(),
+            "Most Common": df[col].mode()[0] if len(df[col].mode()) > 0 else "N/A",
+            "Missing": df[col].isna().sum()
+        }
+    
+    return summary
+
+# ---------- Visualization Functions ----------
+def create_distribution_plot(df, column):
+    """Create distribution plot for a column"""
+    if df[column].dtype in [np.float64, np.int64]:
+        fig = px.histogram(df, x=column, nbins=50, 
+                          title=f"Distribution of {column}",
+                          labels={column: column},
+                          color_discrete_sequence=['#636EFA'])
+        fig.update_layout(showlegend=False, height=400)
+        return fig
+    else:
+        value_counts = df[column].value_counts().head(20)
+        fig = px.bar(x=value_counts.index, y=value_counts.values,
+                    title=f"Top 20 Values in {column}",
+                    labels={'x': column, 'y': 'Count'},
+                    color_discrete_sequence=['#636EFA'])
+        fig.update_layout(height=400)
+        return fig
+
+def create_time_series_plot(df):
+    """Create time series plot if date column exists"""
+    if 'date' in df.columns and 'data' in df.columns:
+        fig = px.line(df, x='date', y='data', 
+                     title='Time Series: Data over Date',
+                     labels={'date': 'Date', 'data': 'Value'},
+                     color_discrete_sequence=['#00CC96'])
+        fig.update_layout(height=400)
+        return fig
+    return None
+
+def create_box_plot(df, column):
+    """Create box plot for numerical column"""
+    if df[column].dtype in [np.float64, np.int64]:
+        fig = px.box(df, y=column, 
+                    title=f"Box Plot: {column}",
+                    color_discrete_sequence=['#AB63FA'])
+        fig.update_layout(height=400)
+        return fig
+    return None
+
+def create_correlation_heatmap(df):
+    """Create correlation heatmap for numerical columns"""
+    numeric_df = df.select_dtypes(include=[np.number])
+    if len(numeric_df.columns) > 1:
+        corr = numeric_df.corr()
+        fig = px.imshow(corr, 
+                       text_auto=True,
+                       title="Correlation Heatmap",
+                       color_continuous_scale='RdBu_r',
+                       aspect='auto')
+        fig.update_layout(height=500)
+        return fig
+    return None
+
+# ---------- Main UI ----------
+def main():
+    st.set_page_config(
+        page_title="EDA Dashboard - data1.csv",
+        page_icon="📊",
+        layout="wide"
+    )
+    
+    st.title("📊 Exploratory Data Analysis Dashboard")
+    st.markdown("### Analyzing `data1.csv` with AI-Powered Insights")
+    st.divider()
+    
+    # Load data
+    df = load_data()
+    if df is None:
+        st.error("Failed to load data. Please ensure data1.csv is in the same directory.")
+        return
+    
+    # Initialize AI client
+    client = get_ai_client()
+    
+    # Sidebar
+    st.sidebar.header("📋 Navigation")
+    analysis_type = st.sidebar.radio(
+        "Select Analysis Type",
+        ["Overview", "Statistical Summary", "Visualizations", "AI Insights", "Data Explorer"]
+    )
+    
+    # ---------- OVERVIEW ----------
+    if analysis_type == "Overview":
+        st.header("📈 Dataset Overview")
+        
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("Total Rows", f"{len(df):,}")
+        with col2:
+            st.metric("Total Columns", len(df.columns))
+        with col3:
+            st.metric("Memory Usage", f"{df.memory_usage(deep=True).sum() / 1024**2:.2f} MB")
+        with col4:
+            st.metric("Missing Values", df.isna().sum().sum())
+        
+        st.subheader("Column Information")
+        col_info = pd.DataFrame({
+            'Column': df.columns,
+            'Data Type': df.dtypes.values,
+            'Non-Null Count': df.count().values,
+            'Null Count': df.isna().sum().values,
+            'Unique Values': [df[col].nunique() for col in df.columns]
+        })
+        st.dataframe(col_info, use_container_width=True)
+        
+        st.subheader("Sample Data (First 10 Rows)")
+        st.dataframe(df.head(10), use_container_width=True)
+    
+    # ---------- STATISTICAL SUMMARY ----------
+    elif analysis_type == "Statistical Summary":
+        st.header("📊 Statistical Summary")
+        
+        summary = get_statistical_summary(df)
+        
+        # Basic Info
+        st.subheader("Basic Information")
+        basic_df = pd.DataFrame([summary["Basic Info"]]).T
+        basic_df.columns = ['Value']
+        st.dataframe(basic_df, use_container_width=True)
+        
+        # Numerical Columns
+        if summary["Numerical Columns"]:
+            st.subheader("Numerical Columns Statistics")
+            num_stats = pd.DataFrame(summary["Numerical Columns"]).T
+            st.dataframe(num_stats.style.format("{:.4f}"), use_container_width=True)
+            
+            # Additional statistics
+            st.subheader("Descriptive Statistics")
+            st.dataframe(df.describe(), use_container_width=True)
+        
+        # Categorical Columns
+        if summary["Categorical Columns"]:
+            st.subheader("Categorical Columns Statistics")
+            cat_stats = pd.DataFrame(summary["Categorical Columns"]).T
+            st.dataframe(cat_stats, use_container_width=True)
+    
+    # ---------- VISUALIZATIONS ----------
+    elif analysis_type == "Visualizations":
+        st.header("📉 Data Visualizations")
+        
+        # Time Series Plot
+        st.subheader("Time Series Analysis")
+        ts_plot = create_time_series_plot(df)
+        if ts_plot:
+            st.plotly_chart(ts_plot, use_container_width=True)
+        else:
+            st.info("No time series data available")
+        
+        # Distribution Plots
+        st.subheader("Distribution Analysis")
+        numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+        
+        if numeric_cols:
+            selected_col = st.selectbox("Select column for distribution", numeric_cols)
+            dist_plot = create_distribution_plot(df, selected_col)
+            st.plotly_chart(dist_plot, use_container_width=True)
+            
+            # Box plot
+            box_plot = create_box_plot(df, selected_col)
+            if box_plot:
+                st.plotly_chart(box_plot, use_container_width=True)
+        
+        # Correlation Heatmap
+        st.subheader("Correlation Analysis")
+        corr_plot = create_correlation_heatmap(df)
+        if corr_plot:
+            st.plotly_chart(corr_plot, use_container_width=True)
+        else:
+            st.info("Not enough numerical columns for correlation analysis")
+        
+        # Value Counts for Categorical
+        st.subheader("Categorical Distribution")
+        cat_cols = df.select_dtypes(include=['object']).columns.tolist()
+        if cat_cols:
+            selected_cat = st.selectbox("Select categorical column", cat_cols)
+            cat_plot = create_distribution_plot(df, selected_cat)
+            st.plotly_chart(cat_plot, use_container_width=True)
+    
+    # ---------- AI INSIGHTS ----------
+    elif analysis_type == "AI Insights":
+        st.header("🤖 AI-Powered Insights")
+        
+        # Prepare data summary for AI
+        summary = get_statistical_summary(df)
+        data_summary = f"""
+Dataset: data1.csv
+Total Rows: {len(df):,}
+Total Columns: {len(df.columns)}
+
+Columns: {', '.join(df.columns.tolist())}
+
+Numerical Statistics:
+{json.dumps(summary['Numerical Columns'], indent=2, default=str)}
+
+Categorical Statistics:
+{json.dumps(summary['Categorical Columns'], indent=2, default=str)}
+
+Sample Data:
+{df.head(5).to_string()}
+"""
+        
+        # Auto-generate insights
+        st.subheader("Automatic Insights")
+        with st.spinner("Generating AI insights..."):
+            insights = get_ai_insights(client, data_summary)
+            st.markdown(insights)
+        
+        st.divider()
+        
+        # Ask custom questions
+        st.subheader("Ask Questions About Your Data")
+        user_question = st.text_area(
+            "What would you like to know about this dataset?",
+            placeholder="E.g., What are the main trends in the data? Are there any outliers? What patterns can you identify?"
+        )
+        
+        if st.button("Get AI Answer", type="primary"):
+            if user_question:
+                with st.spinner("Analyzing..."):
+                    answer = get_ai_insights(client, data_summary, user_question)
+                    st.markdown("### Answer:")
+                    st.markdown(answer)
+            else:
+                st.warning("Please enter a question first.")
+    
+    # ---------- DATA EXPLORER ----------
+    elif analysis_type == "Data Explorer":
+        st.header("🔍 Interactive Data Explorer")
+        
+        # Filters
+        st.subheader("Filter Data")
+        
+        # Column selection
+        all_columns = df.columns.tolist()
+        selected_columns = st.multiselect(
+            "Select columns to display",
+            all_columns,
+            default=all_columns[:5] if len(all_columns) > 5 else all_columns
+        )
+        
+        # Row range
+        col1, col2 = st.columns(2)
+        with col1:
+            start_row = st.number_input("Start Row", min_value=0, max_value=len(df)-1, value=0)
+        with col2:
+            end_row = st.number_input("End Row", min_value=1, max_value=len(df), value=min(100, len(df)))
+        
+        # Display filtered data
+        if selected_columns:
+            filtered_df = df[selected_columns].iloc[start_row:end_row]
+            st.dataframe(filtered_df, use_container_width=True)
+            
+            # Download option
+            csv = filtered_df.to_csv(index=False)
+            st.download_button(
+                label="Download Filtered Data as CSV",
+                data=csv,
+                file_name="filtered_data.csv",
+                mime="text/csv"
+            )
+        else:
+            st.warning("Please select at least one column to display.")
+        
+        # Search functionality
+        st.subheader("Search Data")
+        search_col = st.selectbox("Select column to search", df.columns.tolist())
+        search_term = st.text_input("Enter search term")
+        
+        if search_term:
+            if df[search_col].dtype == 'object':
+                search_results = df[df[search_col].str.contains(search_term, case=False, na=False)]
+            else:
+                try:
+                    search_results = df[df[search_col] == float(search_term)]
+                except:
+                    search_results = pd.DataFrame()
+            
+            st.write(f"Found {len(search_results)} matching rows")
+            if len(search_results) > 0:
+                st.dataframe(search_results, use_container_width=True)
+
+if __name__ == "__main__":
+    main()
